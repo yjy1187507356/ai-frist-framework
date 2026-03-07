@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "predev": "pnpm --filter '@ai-first/*' build",
     "dev": "node --import @swc-node/register/esm-register --watch src/server.ts",
     "start": "node dist/server.js",
     "build": "tsup",
