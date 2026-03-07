@@ -1,8 +1,5 @@
 /**
- * ReportService - 演示 @Async 的重计算任务 + 自定义 onError 错误处理
- *
- * generateSalesReport  —— 1 秒的"重"计算，fire-and-forget
- * generateFailingReport —— 必然抛错，展示 @Async({ onError }) 捕获机制
+ * ReportService - 演示 @Async 重计算任务 + 自定义 onError 错误处理
  */
 import 'reflect-metadata';
 import { Service, Async } from '@ai-first/core';
@@ -18,16 +15,11 @@ export class ReportService {
   @Autowired()
   private taskLogService!: TaskLogService;
 
-  /**
-   * 生成销售报告（模拟 1 秒重计算）
-   *
-   * 因为标注了 @Async，HTTP 响应在 ~0 ms 内返回，
-   * 1 秒后报告完成并写入日志。
-   */
+  /** 生成销售报告（模拟 1s 重计算），fire-and-forget */
   @Async()
   async generateSalesReport(month: string): Promise<void> {
     const start = Date.now();
-    await sleep(1000); // 模拟大量数据聚合
+    await sleep(1000);
     this.taskLogService.addLog({
       type: 'sales-report',
       status: 'done',
@@ -39,14 +31,12 @@ export class ReportService {
   }
 
   /**
-   * 必然失败的任务 —— 演示 @Async({ onError }) 的错误隔离
-   *
-   * 关键点：即使后台任务抛出异常，调用方（HTTP 响应）依然是 200 OK。
-   * 错误由自定义 onError 处理器捕获，不会传播给调用方。
+   * 必然失败的任务 —— 演示 @Async({ onError }) 错误隔离
+   * 调用方收到 200 OK，错误被自定义 handler 捕获
    */
   @Async({
     onError: (err, method) => {
-      console.error(`[ReportService] Custom onError caught in "${method}":`, (err as Error).message);
+      console.error(`[ReportService] Custom onError in "${method}":`, (err as Error).message);
     },
   })
   async generateFailingReport(reportType: string): Promise<void> {
