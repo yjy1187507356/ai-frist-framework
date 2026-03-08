@@ -46,3 +46,6 @@ tmp
 
 # aiko-boot transformer cache
 .~*.ts
+
+# Java generated code (codegen output)
+**/gen/
