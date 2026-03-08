@@ -1,29 +1,32 @@
-# AI-First Framework
+# Aiko Boot
 
 **AI 可理解的全栈开发框架**
 
-基于 React + Next.js + TypeScript，通过 ESLint 规范化，让 AI 能够理解、生成、优化您的全栈应用代码。
+基于 TypeScript + Next.js，采用 **MyBatis-Plus 风格 API**，让 AI 能够理解、生成、优化您的全栈应用代码，并支持一键转换为 Java Spring Boot + MyBatis-Plus 项目。
 
 ## 🎯 核心理念
 
-- **AI Native**: 使用 AI 最熟悉的语言 (React/Next.js)
+- **AI Native**: 使用 AI 最熟悉的语言 (TypeScript/React/Next.js)
 - **Code First**: 代码即设计，无需学习新 DSL
-- **Type Safe**: TypeScript + ESLint 保证代码质量
-- **Java Compatible**: 前端代码可转换为 Java 后端
+- **Type Safe**: TypeScript + 装饰器保证代码质量
+- **Java Compatible**: TypeScript 代码可转换为 Java Spring Boot + MyBatis-Plus
 
 ## 📦 工程结构
 
 ```
-ai-first-framework/
+aiko-boot/
 ├── packages/
-│   ├── core/            # 核心装饰器和元数据系统 ✅ 已完成
-│   ├── nextjs/          # Next.js 适配层 (待开发)
-│   ├── di/              # 依赖注入容器 (待开发)
-│   ├── types/           # 类型定义和 DTO 基类 (待开发)
-│   ├── validation/      # 数据验证 (待开发)
-│   ├── eslint-plugin/   # ESLint 规范插件 (待开发)
-│   └── codegen/         # Java 代码生成器 (待开发)
-├── examples/            # 示例项目
+│   ├── aiko-boot/           # 核心启动包 (DI + 自动配置) ✅
+│   ├── aiko-boot-starter-web/       # Web Starter ✅
+│   ├── aiko-boot-starter-orm/       # ORM Starter (MyBatis-Plus API + Kysely) ✅
+│   ├── aiko-boot-starter-validation/ # Validation Starter ✅
+│   ├── codegen/             # Java 代码生成器 ✅
+│   ├── eslint-plugin/       # ESLint 规范插件
+│   └── types/               # 类型定义
+├── app/
+│   ├── examples/            # 示例项目
+│   │   └── user-crud/       # 用户 CRUD 示例 ✅
+│   └── framework/           # 框架组件
 ├── package.json
 ├── pnpm-workspace.yaml
 └── tsconfig.json
@@ -43,92 +46,160 @@ pnpm install
 pnpm build
 ```
 
-### 开发模式（热更新）
+### 运行示例项目
 
 ```bash
+cd app/examples/user-crud/packages/api
 pnpm dev
 ```
 
-### 代码检查
+## 📚 核心包
 
-```bash
-pnpm lint
-```
+### @ai-partner-x/aiko-boot-starter-orm
 
-### 类型检查
+MyBatis-Plus 风格的 ORM，底层使用 Kysely，支持多数据库：
 
-```bash
-pnpm type-check
-```
+- **支持数据库**: PostgreSQL、SQLite、MySQL
+- **BaseMapper**: 通用 CRUD 操作
+- **QueryWrapper**: 条件构造器
+- **装饰器**: `@TableName`, `@TableId`, `@TableField`, `@Mapper`
 
-## 📚 已完成的包
+### @ai-partner-x/aiko-boot
 
-### @ai-first/core
+依赖注入容器与自动配置：
 
-核心装饰器和元数据系统，提供：
+- **装饰器**: `@Service`, `@Autowired`, `@Inject`
+- **自动注入**: 支持构造函数和属性注入
 
-- **实体层装饰器**: `@Entity`, `@Field`, `@DbField`, `@Validation`
-- **服务层装饰器**: `@Repository`, `@Service`, `@AppService`
-- **方法装饰器**: `@Action`, `@Expose`, `@Transactional`
+### @ai-partner-x/codegen
 
-查看 [packages/core/README.md](./packages/core/README.md) 了解详细用法。
+Java 代码生成器：
+
+- **输入**: TypeScript 装饰器代码
+- **输出**: Java Spring Boot + MyBatis-Plus 代码
 
 ## 🎓 示例代码
 
-```typescript
-import { Entity, Field, DbField, Validation, Service, AppService, Action, Expose } from '@ai-first/core';
+### Entity 实体
 
-// 定义实体
-@Entity({ table: 'users' })
+```typescript
+import { TableName, TableId, TableField } from '@ai-partner-x/aiko-boot-starter-orm';
+
+@TableName({ tableName: 'sys_user' })
 export class User {
-  @Field({ label: 'ID' })
-  @DbField({ primaryKey: true, type: 'BIGINT' })
+  @TableId({ type: 'AUTO' })
   id: number;
 
-  @Field({ label: 'Username' })
-  @Validation({ required: true, min: 3, max: 50 })
+  @TableField({ column: 'user_name' })
   username: string;
-}
 
-// 定义服务
+  @TableField()
+  email: string;
+}
+```
+
+### Mapper 数据访问层
+
+```typescript
+import { Mapper, BaseMapper } from '@ai-partner-x/aiko-boot-starter-orm';
+import { User } from '../entity/user.entity';
+
+@Mapper(User)
+export class UserMapper extends BaseMapper<User> {}
+```
+
+### Service 服务层
+
+```typescript
+import { Service, Autowired } from '@ai-partner-x/aiko-boot';
+import { QueryWrapper } from '@ai-partner-x/aiko-boot-starter-orm';
+import { UserMapper } from '../mapper/user.mapper';
+
 @Service()
 export class UserService {
-  async findById(id: number): Promise<User | null> {
-    // 实现逻辑
+  @Autowired()
+  userMapper: UserMapper;
+
+  async findByUsername(username: string) {
+    const wrapper = new QueryWrapper<User>()
+      .eq('username', username);
+    return this.userMapper.selectOne(wrapper);
+  }
+
+  async findActiveUsers() {
+    const wrapper = new QueryWrapper<User>()
+      .eq('status', 1)
+      .orderByDesc('createdAt');
+    return this.userMapper.selectList(wrapper);
   }
 }
+```
 
-// 定义应用服务（可暴露为 API）
-@AppService({ expose: true })
-export class UserAppService {
-  constructor(private userService: UserService) {}
+### Controller 控制器
 
-  @Action({ transaction: true })
-  @Expose({ method: 'POST', path: '/api/user/create' })
-  async createUser(data: CreateUserDto): Promise<User> {
-    return this.userService.create(data);
+```typescript
+import { RestController, GetMapping, PostMapping, PathVariable, RequestBody } from '@ai-partner-x/aiko-boot-starter-web';
+
+@RestController({ path: '/api/users' })
+export class UserController {
+  @Autowired()
+  userService: UserService;
+
+  @GetMapping('/:id')
+  async getById(@PathVariable('id') id: number) {
+    return this.userService.getById(id);
   }
+
+  @PostMapping()
+  async create(@RequestBody() dto: CreateUserDto) {
+    return this.userService.create(dto);
+  }
+}
+```
+
+## 🔄 Java 代码生成
+
+TypeScript 代码可一键转换为 Java Spring Boot + MyBatis-Plus：
+
+```typescript
+// TypeScript
+@TableName({ tableName: 'sys_user' })
+export class User {
+  @TableId({ type: 'AUTO' })
+  id: number;
+}
+```
+
+生成的 Java 代码：
+
+```java
+// Java
+@Data
+@TableName("sys_user")
+public class User {
+    @TableId(type = IdType.AUTO)
+    private Long id;
 }
 ```
 
 ## 🛣️ 开发路线图
 
 - [x] 项目初始化和 monorepo 结构
-- [x] @ai-first/core - 核心装饰器系统
-- [ ] @ai-first/di - 依赖注入容器
-- [ ] @ai-first/types - 类型定义和 DTO 基类
-- [ ] @ai-first/validation - 数据验证器
-- [ ] @ai-first/nextjs - Next.js 适配层
-- [ ] @ai-first/eslint-plugin - ESLint 规范插件
-- [ ] @ai-first/codegen - Java 代码生成器
-- [ ] 示例项目
+- [x] @ai-partner-x/aiko-boot - 核心启动包
+- [x] @ai-partner-x/aiko-boot-starter-orm - MyBatis-Plus 风格 ORM
+- [x] @ai-partner-x/aiko-boot-starter-validation - 数据验证器
+- [x] @ai-partner-x/aiko-boot-starter-web - Web Starter
+- [x] @ai-partner-x/codegen - Java 代码生成器
+- [x] user-crud 示例项目
+- [ ] @ai-partner-x/eslint-plugin - ESLint 规范插件
+- [ ] 更多示例项目
 - [ ] 完整文档
 
 ## 📖 文档
 
-- [核心概念](./docs/concepts.md) (待编写)
-- [快速开始](./docs/quick-start.md) (待编写)
-- [API 参考](./docs/api-reference.md) (待编写)
+- [架构设计](./docs/architecture.md)
+- [开发路线图](./docs/roadmap-2026Q1.md)
+- [Java 兼容性](./JAVA_COMPATIBILITY.md)
 
 ## 🤝 贡献
 

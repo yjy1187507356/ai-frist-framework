@@ -44,5 +44,5 @@ yarn-error.log*
 .temp
 tmp
 
-# AI-First transformer cache
+# aiko-boot transformer cache
 .~*.ts
