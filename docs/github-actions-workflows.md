@@ -9,6 +9,7 @@
 | `auto-label.yml` | Issue 创建时 | 自动添加标签和类型 |
 | `opencode-triage.yml` | Issue 创建时 | AI 分析并回复 |
 | `opencode.yml` | Issue/PR 评论 | AI 命令响应 |
+| `pr-review.yml` | PR 创建/更新时 | 静态检查 + 测试 + AI 审查 |
 
 ---
 
@@ -201,6 +202,100 @@ on:
 
 ---
 
+## 4. pr-review.yml - PR 自动审查
+
+### 功能说明
+
+当 PR 创建或更新时，自动执行代码质量检查并使用 AI 进行审查。
+
+### 触发条件
+
+```yaml
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+```
+
+| 事件 | 说明 |
+|------|------|
+| `opened` | PR 创建时 |
+| `synchronize` | PR 有新提交时 |
+| `reopened` | PR 重新打开时 |
+| `ready_for_review` | PR 标记为可审查时 |
+
+### 检查流程
+
+```
+PR 创建/更新
+    │
+    ├── 1. TypeScript 类型检查
+    │       └── pnpm type-check
+    │
+    ├── 2. ESLint 代码检查
+    │       └── pnpm lint
+    │
+    ├── 3. 单元测试执行
+    │       └── pnpm test
+    │
+    └── 4. AI 综合分析
+            ├── 分析检查结果
+            ├── 审查代码质量
+            ├── 识别潜在问题
+            └── 提供修复建议
+```
+
+### AI 审查内容
+
+1. **检查结果分析** - 分析类型检查、ESLint、测试的结果
+2. **代码质量** - 可读性、规范、重复代码
+3. **潜在问题** - Bug、安全风险、性能问题
+4. **最佳实践** - TypeScript 规范、框架使用
+5. **测试覆盖** - 单元测试、边界情况
+
+### 输出格式
+
+AI 会按以下格式发布审查评论：
+
+```
+### 🔴 必须修复
+列出类型错误、测试失败等必须修复的问题
+
+### 🟡 建议改进  
+列出 ESLint 警告、代码风格问题
+
+### ✅ 优点
+列出代码的优点
+
+### 💡 建议
+其他建议和修复方案
+```
+
+### 示例
+
+创建 PR 后，AI 会自动发布审查评论：
+
+```
+## PR 审查结果
+
+### 🔴 必须修复
+1. src/user.ts:45 - 类型错误: 'user' 可能为 null
+2. 测试失败: UserService.test.ts - 期望值不匹配
+
+### 🟡 建议改进
+1. src/auth.ts:12 - 未使用的变量 'temp'
+2. src/utils.ts:88 - 缺少返回类型声明
+
+### ✅ 优点
+- 代码结构清晰，模块划分合理
+- 使用了 TypeScript 类型保护
+
+### 💡 建议
+- 建议添加更多单元测试覆盖边界情况
+- 可以使用可选链操作符简化代码
+```
+
+---
+
 ## 配置要求
 
 ### Secrets 配置
@@ -298,6 +393,13 @@ permissions:
 Issue/PR 评论
     ├── 包含 /oc 或 /opencode → opencode.yml → AI 响应 → 发布回复评论
     └── 不包含命令 → 不触发
+
+创建/更新 PR
+    └── pr-review.yml
+            ├── TypeScript 类型检查
+            ├── ESLint 代码检查
+            ├── 单元测试执行
+            └── AI 综合分析 → 发布审查评论
 ```
 
 ---
