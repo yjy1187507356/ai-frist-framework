@@ -1,6 +1,6 @@
 # AI-First Framework — 新特性功能 Summary
 
-> 本文档覆盖三项新增能力：**文件上传**（`MultipartFile` + `@RequestPart`）、**请求绑定参数装饰器**（`@ModelAttribute` + `@RequestAttribute`）和**异步与响应式支持**（`@Async`）。
+> 本文档覆盖四项新增能力：**文件上传**（`MultipartFile` + `@RequestPart`）、**请求绑定参数装饰器**（`@ModelAttribute` + `@RequestAttribute`）、**异步与响应式支持**（`@Async`）以及 **JSON 序列化格式化**（`@JsonFormat`）。
 >
 > 这些能力均已集成到新一代 **Aiko Boot** 框架（`@ai-partner-x/aiko-boot-starter-web` + `@ai-partner-x/aiko-boot`），支持 Spring Boot 风格的自动配置（AutoConfiguration）和配置化能力（`@ConfigurationProperties`）。
 >
@@ -335,7 +335,211 @@ curl http://localhost:3001/api/form/tenant-info
 
 ---
 
-## 三、异步与响应式支持 — `@Async`
+## 四、JSON 序列化格式化 — `@JsonFormat`
+
+### 功能概述
+
+`@JsonFormat` 是 `@ai-partner-x/aiko-boot-starter-web` 提供的**属性装饰器**，对应 Spring Boot / Jackson 的 `@JsonFormat` 注解。最常见的场景是将 DTO 中的 `Date` 字段以人类可读的字符串格式（而非默认 ISO-8601）输出到 JSON 响应中。
+
+- 在 DTO 类的 `Date` 类型属性上标注 `@JsonFormat`，控制器返回该对象时框架**自动格式化**，无需手动调用任何转换函数。
+- 支持 Java `SimpleDateFormat` 风格的 `pattern`（`yyyy-MM-dd HH:mm:ss` 等）。
+- 支持 IANA 时区（`Asia/Shanghai`、`UTC`、`America/New_York` 等）。
+- 支持 `shape: 'NUMBER'` 将日期序列化为 Unix 毫秒时间戳。
+- 格式化逻辑由 `applyJsonFormat()` 递归遍历整个对象图；数组、嵌套对象均可正确处理。
+
+| TypeScript | Java Spring 对应 |
+|---|---|
+| `@JsonFormat({ pattern, timezone, shape })` | `@com.fasterxml.jackson.annotation.JsonFormat` |
+| `formatDate(date, pattern, timezone?)` | Jackson 内部 `_format.format(date)` |
+| `applyJsonFormat(value)` | Jackson `ObjectMapper` 序列化管道 |
+
+### 开发思路
+
+1. **元数据驱动**：`@JsonFormat` 通过 `reflect-metadata` 将格式配置写入类原型（key `'aiko-boot:jsonFormat'`），以属性名为键存储。路由层在序列化响应时读取元数据，按配置格式化对应字段。
+2. **自动应用**：`createExpressRouter` 中的响应处理器在 `res.json()` 之前自动调用 `applyJsonFormat(result)`，控制器代码无需任何修改即可享受格式化能力。
+3. **无侵入**：未标注 `@JsonFormat` 的 `Date` 字段保持默认行为（`JSON.stringify` 输出 ISO-8601 字符串）；非 `Date` 字段不受影响。
+4. **性能友好**：格式化 token 键表 `SORTED_DATE_TOKEN_KEYS` 在模块加载时一次性按长度降序排好，`formatDate()` 每次调用仅构建一个 `tokenValues` Map，不再重新排序。
+
+### 技术实现
+
+#### `JsonFormatOptions` 类型（`@ai-partner-x/aiko-boot-starter-web`）
+
+```typescript
+export interface JsonFormatOptions {
+  /**
+   * Java SimpleDateFormat 风格的日期格式字符串。
+   * 支持 token：yyyy yy MM M dd d HH H mm m ss s SSS S
+   * @example 'yyyy-MM-dd HH:mm:ss'
+   */
+  pattern?: string;
+  /**
+   * IANA 时区标识符，省略时使用进程本地时区。
+   * @example 'Asia/Shanghai'  'UTC'  'America/New_York'
+   */
+  timezone?: string;
+  /**
+   * 序列化形态：'STRING'（默认，使用 pattern 格式化）或 'NUMBER'（Unix 毫秒时间戳）
+   */
+  shape?: 'STRING' | 'NUMBER';
+}
+```
+
+#### `@JsonFormat` 装饰器（`packages/aiko-boot-starter-web/src/decorators.ts`）
+
+```typescript
+export function JsonFormat(options: JsonFormatOptions = {}) {
+  return function (target: object, propertyKey: string) {
+    const formats = Reflect.getMetadata('aiko-boot:jsonFormat', target) || {};
+    formats[propertyKey] = options;
+    Reflect.defineMetadata('aiko-boot:jsonFormat', formats, target);
+  };
+}
+```
+
+#### `formatDate` 工具函数（`packages/aiko-boot-starter-web/src/decorators.ts`）
+
+```typescript
+// 支持 token（从长到短处理，避免 'MM' 被误识别为 'M'+'M'）：
+// yyyy  4 位年  yy   2 位年
+// MM    2 位月  M    不补零月
+// dd    2 位日  d    不补零日
+// HH    2 位时  H    不补零时
+// mm    2 位分  m    不补零分
+// ss    2 位秒  s    不补零秒
+// SSS   3 位毫秒  S   不补零毫秒
+
+formatDate(new Date('2024-03-09T08:05:06.007Z'), 'yyyy/MM/dd HH:mm:ss.SSS', 'Asia/Shanghai')
+// → '2024/03/09 16:05:06.007'  (UTC+8)
+```
+
+#### `applyJsonFormat` 递归序列化（`packages/aiko-boot-starter-web/src/decorators.ts`）
+
+```typescript
+// 自动在路由响应中调用，无需手动使用
+export function applyJsonFormat(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(item => applyJsonFormat(item));
+  if (value instanceof Date) return value;          // 无注解时原样保留
+  if (typeof value === 'object' && value !== null) {
+    const proto   = Object.getPrototypeOf(value);
+    const formats = proto !== Object.prototype
+      ? Reflect.getMetadata('aiko-boot:jsonFormat', proto) || {}
+      : {};
+    const result: Record<string, unknown> = {};
+    for (const key of Object.keys(value as object)) {
+      const val = (value as any)[key];
+      const fmt = formats[key];
+      if (fmt && val instanceof Date) {
+        result[key] = fmt.shape === 'NUMBER'
+          ? val.getTime()
+          : (fmt.pattern ? formatDate(val, fmt.pattern, fmt.timezone) : val.toISOString());
+      } else {
+        result[key] = applyJsonFormat(val);         // 递归嵌套对象
+      }
+    }
+    return result;
+  }
+  return value;
+}
+```
+
+#### 路由层自动应用（`packages/aiko-boot-starter-web/src/express-router.ts`）
+
+```typescript
+// 控制器方法执行完成后，在 res.json() 之前自动格式化
+const result = await controllerMethod.apply(instance, args);
+res.json({ success: true, data: applyJsonFormat(result) });
+```
+
+### 快速开始
+
+#### 1. 在 DTO 中标注 `@JsonFormat`
+
+```typescript
+import { JsonFormat } from '@ai-partner-x/aiko-boot-starter-web';
+
+export class UserDto {
+  id!: number;
+  name!: string;
+
+  /** 格式化为上海时区字符串 */
+  @JsonFormat({ pattern: 'yyyy-MM-dd HH:mm:ss', timezone: 'Asia/Shanghai' })
+  createTime?: Date;
+
+  /** 仅日期，不含时间 */
+  @JsonFormat({ pattern: 'yyyy-MM-dd' })
+  birthday?: Date;
+
+  /** Unix 毫秒时间戳（数字类型） */
+  @JsonFormat({ shape: 'NUMBER' })
+  updatedAt?: Date;
+}
+```
+
+#### 2. 控制器返回 DTO — 无需额外代码
+
+```typescript
+import {
+  RestController, GetMapping, PathVariable,
+} from '@ai-partner-x/aiko-boot-starter-web';
+
+@RestController({ path: '/users' })
+export class UserController {
+  @GetMapping('/:id')
+  getUser(@PathVariable('id') id: string): UserDto {
+    const dto = new UserDto();
+    dto.id         = Number(id);
+    dto.name       = 'Alice';
+    dto.createTime = new Date('2024-01-15T00:30:00Z');
+    dto.birthday   = new Date('1995-06-20T00:00:00Z');
+    dto.updatedAt  = new Date('2024-03-09T08:00:00Z');
+    return dto;
+  }
+}
+```
+
+**响应示例：**
+
+```json
+{
+  "success": true,
+  "data": {
+    "id": 1,
+    "name": "Alice",
+    "createTime": "2024-01-15 08:30:00",
+    "birthday":   "1995-06-20",
+    "updatedAt":  1709971200000
+  }
+}
+```
+
+#### 3. `curl` 测试
+
+```bash
+curl http://localhost:3001/api/users/1
+```
+
+#### 支持的 `pattern` token 速查
+
+| Token | 含义 | 示例（2024-03-09 08:05:06.007） |
+|---|---|---|
+| `yyyy` | 4 位年 | `2024` |
+| `yy` | 2 位年 | `24` |
+| `MM` | 2 位月（补零） | `03` |
+| `M` | 月（不补零） | `3` |
+| `dd` | 2 位日（补零） | `09` |
+| `d` | 日（不补零） | `9` |
+| `HH` | 2 位 24 制小时（补零） | `08` |
+| `H` | 小时（不补零） | `8` |
+| `mm` | 2 位分钟（补零） | `05` |
+| `m` | 分钟（不补零） | `5` |
+| `ss` | 2 位秒（补零） | `06` |
+| `s` | 秒（不补零） | `6` |
+| `SSS` | 3 位毫秒（补零） | `007` |
+| `S` | 毫秒（不补零） | `7` |
+
+---
+
+## 五、异步与响应式支持 — `@Async`
 
 ### 功能概述
 
@@ -468,7 +672,7 @@ export class ReportService {
 
 ---
 
-## 四、功能对照表
+## 六、功能对照表
 
 | 功能 | 装饰器 / 类型 | 所在包 | Spring Boot 对应 |
 |---|---|---|---|
@@ -480,10 +684,13 @@ export class ReportService {
 | 中间件属性注入 | `@RequestAttribute(name)` | `@ai-partner-x/aiko-boot-starter-web` | `@RequestAttribute` |
 | fire-and-forget 后台任务 | `@Async(options?)` | `@ai-partner-x/aiko-boot` / re-exported via web-starter | `@Async` |
 | 后台异常处理 | `AsyncOptions.onError` | `@ai-partner-x/aiko-boot` | `AsyncUncaughtExceptionHandler` |
+| JSON 日期格式化 | `@JsonFormat({ pattern, timezone, shape })` | `@ai-partner-x/aiko-boot-starter-web` | `@com.fasterxml.jackson.annotation.JsonFormat` |
+| 日期格式工具函数 | `formatDate(date, pattern, timezone?)` | `@ai-partner-x/aiko-boot-starter-web` | Jackson 内部序列化管道 |
+| 递归 JSON 格式化 | `applyJsonFormat(value)` | `@ai-partner-x/aiko-boot-starter-web` | Jackson `ObjectMapper` |
 
 ---
 
-## 五、安装与运行示例
+## 七、安装与运行示例
 
 ```bash
 # 1. 安装依赖（仓库根目录）
