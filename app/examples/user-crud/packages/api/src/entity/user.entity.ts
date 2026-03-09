@@ -17,6 +17,9 @@ export class User {
   @TableField({ column: 'created_at' })
   createdAt?: Date;
 
+  @TableField({ column: 'created_at1' })
+  createdAt1?: Date;
+
   @TableField({ column: 'updated_at' })
   updatedAt?: Date;
 }

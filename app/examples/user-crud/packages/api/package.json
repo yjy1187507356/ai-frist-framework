@@ -11,6 +11,7 @@
   },
   "scripts": {
     "dev": "node --import @swc-node/register/esm-register --watch src/server.ts",
+    "codegen:watch": "node --import tsx scripts/codegen.ts --watch",
     "init-db": "node --import @swc-node/register/esm-register src/scripts/init-db.ts",
     "codegen": "node --import tsx scripts/codegen.ts",
     "java": "npx aiko-codegen transpile src -p com.example.usercrud",
