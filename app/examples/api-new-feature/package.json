@@ -4,16 +4,15 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "predev": "pnpm --filter \"@ai-first/*\" build",
+    "predev": "pnpm --filter \"@ai-partner-x/*\" build",
     "dev": "node --import @swc-node/register/esm-register --watch src/server.ts",
     "start": "node dist/server.js",
     "build": "tsup",
     "lint": "eslint src"
   },
   "dependencies": {
-    "@ai-first/core": "workspace:*",
-    "@ai-first/di": "workspace:*",
-    "@ai-first/nextjs": "workspace:*",
+    "@ai-partner-x/aiko-boot": "workspace:*",
+    "@ai-partner-x/aiko-boot-starter-web": "workspace:*",
     "cors": "^2.8.5",
     "express": "^4.18.0",
     "reflect-metadata": "^0.2.1"

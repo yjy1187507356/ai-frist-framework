@@ -1,6 +1,7 @@
 # New-Features Example
 
-演示 `@ai-first/core` 和 `@ai-first/nextjs` 当前分支所有新增特性的 Express API。
+演示 `@ai-partner-x/aiko-boot` 和 `@ai-partner-x/aiko-boot-starter-web` 的新增特性：
+文件上传、参数装饰器、和异步后台任务。
 
 ## 快速启动
 
@@ -8,18 +9,43 @@
 # 从仓库根目录安装依赖
 pnpm install
 
+# 构建依赖包
+pnpm --filter "@ai-partner-x/*" build
+
 # 进入示例目录，启动开发服务器（支持热重载）
-cd app/examples/new-features-example
+cd app/examples/api-new-feature
 pnpm dev
 ```
 
-服务器默认监听 **http://localhost:3003**。
+服务器默认监听 **http://localhost:3003**（可在 `app.config.ts` 中修改）。
+
+## 配置（`app.config.ts`）
+
+此示例展示 Aiko Boot AutoConfiguration + `@ConfigurationProperties` 能力：
+
+```typescript
+export default {
+  server: {
+    port: 3003,
+    servlet: { contextPath: '/api' },
+  },
+  spring: {
+    servlet: {
+      multipart: {
+        enabled: true,
+        maxFileSize: '10MB',     // spring.servlet.multipart.max-file-size
+        maxRequestSize: '50MB',  // spring.servlet.multipart.max-request-size
+      },
+    },
+  },
+} satisfies AppConfig;
+```
 
 ---
 
 ## Feature 1 — `@Async` (fire-and-forget 后台任务)
 
-**包**: `@ai-first/core`
+**包**: `@ai-partner-x/aiko-boot`
 
 `@Async()` 将方法变为后台任务：调用方立即拿到 `void` 返回值，真正的逻辑在
 `setImmediate` 后的事件循环 tick 中执行，不阻塞 HTTP 响应。
@@ -73,9 +99,10 @@ curl -X DELETE http://localhost:3003/api/async/log
 
 ## Feature 2 & 3 — `@RequestPart` + `MultipartFile` (文件上传)
 
-**包**: `@ai-first/nextjs`
+**包**: `@ai-partner-x/aiko-boot-starter-web`
 
 含 `@RequestPart` 的路由**自动获得** `multer memoryStorage` 中间件。
+文件大小限制由 `app.config.ts` 的 `spring.servlet.multipart.*` 配置统一管理。
 接收到的文件被包装为 `MultipartFile` 接口，提供与 Spring Boot 一致的 API：
 `getName() / getOriginalFilename() / getContentType() / getSize() / getBytes() / isEmpty() / transferTo(dest)`。
 
@@ -118,7 +145,7 @@ curl -X POST http://localhost:3003/api/upload/multi \
 
 ## Feature 4 — `@ModelAttribute` (query / form 绑定)
 
-**包**: `@ai-first/nextjs`
+**包**: `@ai-partner-x/aiko-boot-starter-web`
 
 将 `req.query`（URL 参数）和 `req.body`（form urlencoded body）合并注入为一个对象，
 无需逐个声明 `@RequestParam`，适合多可选参数的搜索 / 表单场景。
@@ -151,7 +178,7 @@ curl -X POST http://localhost:3003/api/form/register \
 
 ## Feature 5 — `@RequestAttribute` (读取中间件注入的 req 属性)
 
-**包**: `@ai-first/nextjs`
+**包**: `@ai-partner-x/aiko-boot-starter-web`
 
 读取 Express 中间件在 `req` 对象上设置的自定义属性（等同于 Spring Boot
 `HandlerInterceptor.preHandle` → `request.setAttribute()`）。
@@ -195,21 +222,23 @@ curl http://localhost:3003/api/form/tenant-info
 ## 代码结构
 
 ```
-src/
-├── server.ts                           # 外层 Express: Auth 中间件 + 挂载 createApp
-├── service/
-│   ├── task-log.service.ts             # 内存日志单例（@Async 任务写入）
-│   ├── notification.service.ts         # @Async 邮件发送示例
-│   └── report.service.ts              # @Async 重计算 + onError 示例
-└── controller/
-    ├── async.controller.ts             # Feature 1: @Async
-    ├── upload.controller.ts            # Feature 2/3: @RequestPart + MultipartFile
-    └── form.controller.ts              # Feature 4/5: @ModelAttribute + @RequestAttribute
+app/examples/api-new-feature/
+├── app.config.ts                       # Aiko Boot 配置（port、multipart、logging）
+├── src/
+│   ├── server.ts                       # createApp() 自动配置 + Auth 中间件
+│   ├── service/
+│   │   ├── task-log.service.ts         # 内存日志单例（@Async 任务写入）
+│   │   ├── notification.service.ts     # @Async 邮件发送示例
+│   │   └── report.service.ts           # @Async 重计算 + onError 示例
+│   └── controller/
+│       ├── async.controller.ts         # Feature 1: @Async
+│       ├── upload.controller.ts        # Feature 2/3: @RequestPart + MultipartFile
+│       └── form.controller.ts          # Feature 4/5: @ModelAttribute + @RequestAttribute
 ```
 
 ## 相关包
 
 | 包 | 新增特性 |
 |---|---|
-| [`@ai-first/core`](../../../packages/core) | `@Async(options?)` |
-| [`@ai-first/nextjs`](../../../packages/nextjs) | `@RequestPart`, `MultipartFile`, `@ModelAttribute`, `@RequestAttribute` |
+| [`@ai-partner-x/aiko-boot`](../../../packages/aiko-boot) | `@Async(options?)`, `@Service`, `@Autowired` |
+| [`@ai-partner-x/aiko-boot-starter-web`](../../../packages/aiko-boot-starter-web) | `@RequestPart`, `MultipartFile`, `@ModelAttribute`, `@RequestAttribute`, `MultipartProperties` |

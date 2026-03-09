@@ -2,7 +2,7 @@
  * TaskLogService - 记录 @Async 后台任务的执行结果（内存存储）
  */
 import 'reflect-metadata';
-import { Service } from '@ai-first/core';
+import { Service } from '@ai-partner-x/aiko-boot';
 
 export interface TaskLogEntry {
   type: string;

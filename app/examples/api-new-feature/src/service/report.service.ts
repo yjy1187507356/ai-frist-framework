@@ -2,8 +2,7 @@
  * ReportService - 演示 @Async 重计算任务 + 自定义 onError 错误处理
  */
 import 'reflect-metadata';
-import { Service, Async } from '@ai-first/core';
-import { Autowired } from '@ai-first/di/server';
+import { Service, Async, Autowired } from '@ai-partner-x/aiko-boot';
 import { TaskLogService } from './task-log.service.js';
 
 function sleep(ms: number): Promise<void> {

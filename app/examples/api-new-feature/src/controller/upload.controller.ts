@@ -18,7 +18,7 @@ import {
   PostMapping,
   RequestPart,
   type MultipartFile,
-} from '@ai-first/nextjs';
+} from '@ai-partner-x/aiko-boot-starter-web';
 
 @RestController({ path: '/upload' })
 export class UploadController {

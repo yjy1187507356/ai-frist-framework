@@ -21,7 +21,7 @@ import {
   PostMapping,
   ModelAttribute,
   RequestAttribute,
-} from '@ai-first/nextjs';
+} from '@ai-partner-x/aiko-boot-starter-web';
 
 /** 搜索参数 DTO（由 @ModelAttribute 从 query string 绑定） */
 interface SearchDto {

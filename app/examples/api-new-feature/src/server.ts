@@ -1,73 +1,64 @@
 /**
- * New-Features Example — API Server
+ * New-Features Example — API Server (Aiko Boot 风格自动配置)
  *
- * 演示当前分支所有新增装饰器：
- *   1. @Async          — fire-and-forget 后台任务 (@ai-first/core)
- *   2. @RequestPart    — multipart 文件上传 (@ai-first/nextjs)
- *   3. MultipartFile   — Spring Boot 兼容文件接口 (@ai-first/nextjs)
- *   4. @ModelAttribute — query + form body 绑定 (@ai-first/nextjs)
- *   5. @RequestAttribute — Express req 自定义属性注入 (@ai-first/nextjs)
+ * 演示 aiko-boot-starter-web 所有新增装饰器，通过 AutoConfiguration 自动启动 Express：
+ *   1. @Async          — fire-and-forget 后台任务 (@ai-partner-x/aiko-boot)
+ *   2. @RequestPart    — multipart 文件上传 (@ai-partner-x/aiko-boot-starter-web)
+ *   3. MultipartFile   — Spring Boot 兼容文件接口 (@ai-partner-x/aiko-boot-starter-web)
+ *   4. @ModelAttribute — query + form body 绑定 (@ai-partner-x/aiko-boot-starter-web)
+ *   5. @RequestAttribute — Express req 自定义属性注入 (@ai-partner-x/aiko-boot-starter-web)
  *
- * 架构说明：
- *   为了演示 @RequestAttribute，需要 Express 中间件在路由前设置 req 属性。
- *   这里使用"外层 Express 应用"包裹 createApp 返回值：
+ * 配置:
+ *   - app.config.ts → server.port / server.servlet.contextPath
+ *   - app.config.ts → spring.servlet.multipart.maxFileSize / maxRequestSize
  *
- *     outerApp
- *       ├── urlencoded middleware       (form body 解析，供 @ModelAttribute 使用)
- *       ├── Auth middleware             (模拟：设置 req.currentUser + req.tenantId)
- *       └── innerApp (createApp)        (注册所有 Controller 路由)
+ * @RequestAttribute 说明:
+ *   Express 中间件需要在路由注册前向 req 对象写入属性。
+ *   这里使用 getExpressApp() 在 ApplicationReady 后取得 Express 实例，
+ *   再将自定义中间件 prepend 到最前面。
  */
 import 'reflect-metadata';
-import express, { type Request, type Response, type NextFunction } from 'express';
-import corsMiddleware from 'cors';
-import { createApp } from '@ai-first/nextjs';
+import { createApp } from '@ai-partner-x/aiko-boot';
+import { getExpressApp } from '@ai-partner-x/aiko-boot-starter-web';
 import { fileURLToPath } from 'url';
-import { dirname } from 'path';
+import { dirname, join } from 'path';
+import express, { type Request, type Response, type NextFunction } from 'express';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const PORT = process.env.PORT || 3003;
 
-// ─── 创建 inner app（扫描并注册所有 Controller） ────────────────────────────
-const innerApp = await createApp({
+// ─── 创建应用（自动加载 app.config.ts，扫描 controller/ + service/，启动 Express） ──
+const app = await createApp({
   srcDir: __dirname,
-  cors: false,   // 由外层统一处理 CORS
-  verbose: true,
+  configPath: join(__dirname, '..'),   // app.config.ts 在项目根目录
+  scanDirs: ['controller', 'service'],
 });
 
-// ─── 创建 outer app，在路由执行前注入 req 属性 ──────────────────────────────
-const app = express();
+// ─── 在 AutoConfiguration 注册路由后追加自定义中间件（模拟 Auth） ────────────
+// 使用 getExpressApp() 获取已由 WebAutoConfiguration 创建的 Express 实例，
+// 追加 urlencoded 解析器和模拟认证中间件。
+// 如需在路由前注入属性，可通过自定义 @AutoConfiguration 扩展。
+const expressApp = getExpressApp();
+if (expressApp) {
+  // urlencoded body 解析（供 @ModelAttribute form 演示使用）
+  expressApp.use(express.urlencoded({ extended: true }));
 
-// CORS（统一在外层处理）
-app.use(corsMiddleware());
+  /**
+   * 模拟 Auth 中间件：向 req 对象写入 currentUser 和 tenantId。
+   * 真实项目中这里会验证 JWT token 并查询用户信息。
+   * @RequestAttribute 的控制器参数可直接读取这些属性，无需感知中间件实现。
+   */
+  expressApp.use((_req: Request, _res: Response, next: NextFunction) => {
+    const req = _req as Request & { currentUser?: object; tenantId?: string };
+    req.currentUser = { id: 1, name: 'Alice', role: 'admin' };
+    req.tenantId = 'tenant-42';
+    next();
+  });
+}
 
-// urlencoded body 解析（供 @ModelAttribute form 演示使用）
-app.use(express.urlencoded({ extended: true }));
+// ─── 启动 HTTP 服务器 ──────────────────────────────────────────────────────
+await app.run();
 
-// JSON body 解析
-app.use(express.json());
-
-/**
- * 模拟 Auth 中间件：在路由前设置 req.currentUser 和 req.tenantId。
- * 真实项目中这里会验证 JWT token 并从数据库加载用户信息。
- *
- * 这正是 @RequestAttribute 的典型使用场景 —— 控制器通过注解
- * 直接声明对这些属性的依赖，无需手动读取 req 对象。
- */
-app.use((_req: Request, _res: Response, next: NextFunction) => {
-  const req = _req as Request & { currentUser?: object; tenantId?: string };
-  req.currentUser = { id: 1, name: 'Alice', role: 'admin' };
-  req.tenantId = 'tenant-42';
-  next();
-});
-
-// 将 inner app（含所有 Controller 路由）挂载到 outer app
-// Express 共享同一个 req 对象，因此上面注入的属性在 inner app 中同样可见
-app.use(innerApp);
-
-app.listen(PORT, () => {
-  console.log(`
-🚀 New-Features Example running at http://localhost:${PORT}
-
+console.log(`
 ──────────────────────────────────────────────────────────
 Feature 1 — @Async (fire-and-forget 后台任务)
   POST   /api/async/send-email
@@ -91,4 +82,4 @@ Feature 5 — @RequestAttribute (读取中间件设置的 req 属性)
   GET    /api/form/tenant-info
 ──────────────────────────────────────────────────────────
 `);
-});
+

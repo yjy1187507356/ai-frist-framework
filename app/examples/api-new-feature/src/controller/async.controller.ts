@@ -21,8 +21,8 @@ import {
   PostMapping,
   DeleteMapping,
   RequestBody,
-} from '@ai-first/nextjs';
-import { Autowired } from '@ai-first/di/server';
+} from '@ai-partner-x/aiko-boot-starter-web';
+import { Autowired } from '@ai-partner-x/aiko-boot';
 import { NotificationService } from '../service/notification.service.js';
 import { ReportService } from '../service/report.service.js';
 import { TaskLogService } from '../service/task-log.service.js';

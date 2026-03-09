@@ -5,5 +5,5 @@ export default defineConfig({
   format: ['esm'],
   dts: false,
   clean: true,
-  external: [/^@ai-first\//, 'reflect-metadata', 'express', 'cors'],
+  external: [/^@ai-partner-x\//, 'reflect-metadata', 'express', 'cors'],
 });
