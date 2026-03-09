@@ -92,7 +92,6 @@ export {
   OnApplicationStarted,
   OnApplicationReady,
   OnApplicationShutdown,
-  Async,
   ApplicationEventPublisher,
   ApplicationLifecycle,
   getLifecycleListeners,

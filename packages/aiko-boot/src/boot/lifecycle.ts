@@ -199,16 +199,6 @@ export function OnApplicationShutdown(options: { order?: number } = {}) {
 }
 
 /**
- * @Async - 标记方法为异步执行（不阻塞主流程）
- */
-export function Async() {
-  return function (target: any, propertyKey: string, descriptor: PropertyDescriptor) {
-    Reflect.defineMetadata(ASYNC_METADATA, true, target, propertyKey);
-    return descriptor;
-  };
-}
-
-/**
  * 创建生命周期装饰器的工厂函数
  */
 function createLifecycleDecorator(event: LifecycleEvent, options: { order?: number }) {
