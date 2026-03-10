@@ -85,11 +85,12 @@ jobs:
               
               // 检查是否有冲突
               if (!pr.mergeable) {
+                const author = pr.user.login;
                 await github.rest.issues.createComment({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
                   issue_number: prNumber,
-                  body: '❌ 无法合并：PR 存在冲突，请先解决冲突。'
+                  body: `❌ **无法合并：PR 存在冲突**\n\n@${author} 请在你的功能分支上解决冲突：\n\n\`\`\`bash\ngit fetch origin develop\ngit merge origin/develop\n# 解决冲突后\ngit add .\ngit commit -m "fix: resolve merge conflicts with develop"\ngit push\n\`\`\`\n\n完成后 PR 会自动更新，届时可再次使用 \`/oc merge\` 合并。`
                 });
                 return;
               }
