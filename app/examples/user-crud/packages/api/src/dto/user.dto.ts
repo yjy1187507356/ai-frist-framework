@@ -102,3 +102,39 @@ export class UserSearchResultDto {
   page!: number;
   pageSize!: number;
 }
+
+/**
+ * 用户过滤 DTO - 用于 @ModelAttribute 绑定示例
+ * 支持从 URL query string 或 application/x-www-form-urlencoded body 自动绑定
+ *
+ * 注：URL query string 的值始终以字符串形式传递，因此数值型字段（如 minAge、page 等）
+ * 在此 DTO 中声明为 string 类型，并在 Controller 中按需转换为 number。
+ *
+ * @example
+ * GET /api/users/filter?username=alice&minAge=18&maxAge=30&page=1&pageSize=5
+ */
+export class UserFilterDto {
+  /** 用户名关键字（模糊搜索） */
+  username?: string;
+
+  /** 邮箱关键字（模糊搜索） */
+  email?: string;
+
+  /** 最小年龄（字符串，来自 query string，Controller 层转换为 number） */
+  minAge?: string;
+
+  /** 最大年龄（字符串，来自 query string，Controller 层转换为 number） */
+  maxAge?: string;
+
+  /** 页码（字符串，来自 query string，Controller 层转换为 number，默认 1） */
+  page?: string;
+
+  /** 每页条数（字符串，来自 query string，Controller 层转换为 number，默认 10） */
+  pageSize?: string;
+
+  /** 排序字段 */
+  orderBy?: string;
+
+  /** 排序方向: 'asc' | 'desc' */
+  orderDir?: string;
+}
