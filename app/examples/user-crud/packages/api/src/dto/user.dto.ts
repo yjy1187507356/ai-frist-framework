@@ -1,4 +1,5 @@
 import { IsNotEmpty, IsEmail, IsOptional, Length, Min, Max, IsInt } from '@ai-partner-x/aiko-boot-starter-validation';
+import { JsonFormat } from '@ai-partner-x/aiko-boot-starter-web';
 import { User } from '../entity/user.entity.js';
 
 export class CreateUserDto {
@@ -101,6 +102,27 @@ export class UserSearchResultDto {
   total!: number;
   page!: number;
   pageSize!: number;
+}
+
+/**
+ * 用户响应 DTO - 用于 @JsonFormat 日期格式化
+ *
+ * @example
+ * 返回的 Date 字段会自动格式化为指定格式：
+ * - createdAt: "2024-01-15 18:30:00" (GMT+8)
+ * - updatedAt: 1709971200000 (Unix 毫秒时间戳)
+ */
+export class UserResponseDto {
+  id!: number;
+  username!: string;
+  email!: string;
+  age?: number;
+
+  @JsonFormat({ pattern: 'yyyy-MM-dd HH:mm:ss', timezone: 'GMT+8' })
+  createdAt?: Date;
+
+  @JsonFormat({ shape: 'NUMBER' })
+  updatedAt?: Date;
 }
 
 /**

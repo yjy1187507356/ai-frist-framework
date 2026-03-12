@@ -26,7 +26,7 @@ import {
 
 /**
  * 用户档案 DTO，演示三种 @JsonFormat 用法：
- *   1. pattern + timezone  — 格式化为上海时区日期时间字符串
+ *   1. pattern + timezone  — 格式化为 GMT+8 日期时间字符串
  *   2. pattern only        — 仅日期（yyyy-MM-dd），使用进程本地时区
  *   3. shape: 'NUMBER'     — 序列化为 Unix 毫秒时间戳（数字类型）
  */
@@ -35,8 +35,8 @@ class UserProfileDto {
   name!: string;
   email!: string;
 
-  /** 创建时间 — Asia/Shanghai 时区，精确到秒 */
-  @JsonFormat({ pattern: 'yyyy-MM-dd HH:mm:ss', timezone: 'Asia/Shanghai' })
+  /** 创建时间 — GMT+8 时区，精确到秒 */
+  @JsonFormat({ pattern: 'yyyy-MM-dd HH:mm:ss', timezone: 'GMT+8' })
   createTime?: Date;
 
   /** 生日 — 仅日期，无时区转换 */
@@ -58,7 +58,7 @@ export class JsonFormatController {
    * GET /api/json-format/user/:id
    *
    * 返回单个 UserProfileDto。@JsonFormat 注解自动格式化所有 Date 字段：
-   *   createTime → "2024-03-09 16:00:00"  (Asia/Shanghai)
+   *   createTime → "2024-03-09 16:00:00"  (GMT+8)
    *   birthday   → "1995-06-20"
    *   updatedAt  → 1709971200000           (Unix ms)
    *
@@ -108,8 +108,8 @@ export class JsonFormatController {
    * GET /api/json-format/compare
    *
    * 用同一个 Date 值演示三种 @JsonFormat 配置的输出差异：
-   *   - UTC 时区字符串
-   *   - Asia/Shanghai 时区字符串
+   *   - GMT+00:00 时区字符串
+   *   - GMT+8 时区字符串
    *   - Unix 毫秒时间戳（NUMBER shape）
    *
    * curl http://localhost:3003/api/json-format/compare
@@ -122,10 +122,10 @@ export class JsonFormatController {
     class CompareDto {
       label!: string;
 
-      @JsonFormat({ pattern: 'yyyy-MM-dd HH:mm:ss', timezone: 'UTC' })
+      @JsonFormat({ pattern: 'yyyy-MM-dd HH:mm:ss', timezone: 'GMT+00:00' })
       utcTime?: Date;
 
-      @JsonFormat({ pattern: 'yyyy-MM-dd HH:mm:ss', timezone: 'Asia/Shanghai' })
+      @JsonFormat({ pattern: 'yyyy-MM-dd HH:mm:ss', timezone: 'GMT+8' })
       shanghaiTime?: Date;
 
       @JsonFormat({ shape: 'NUMBER' })

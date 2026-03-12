@@ -8,7 +8,7 @@ import { JsonFormat } from '@ai-partner-x/aiko-boot-starter-web';
 export class TaskLogEntry {
   type!: string;
   status!: 'done' | 'failed';
-  @JsonFormat({ pattern: 'yyyy-MM-dd HH:mm:ss.SSS', timezone: 'UTC' })
+  @JsonFormat({ pattern: 'yyyy-MM-dd HH:mm:ss.SSS', timezone: 'GMT+00:00' })
   completedAt!: Date;
   durationMs!: number;
   detail?: Record<string, unknown>;

@@ -30,12 +30,17 @@ import {
   DeleteResponse,
   UserSearchResultDto,
   UserFilterDto,
+  UserResponseDto,
 } from '../dto/user.dto.js';
+import { StorageService, type UploadOptions } from '@ai-partner-x/aiko-boot-starter-storage';
 
 @RestController({ path: '/users' })
 export class UserController {
   @Autowired()
   private userService!: UserService;
+
+  @Autowired()
+  private storageService!: StorageService;
 
   @GetMapping()
   async list(): Promise<User[]> {
@@ -200,6 +205,7 @@ export class UserController {
 
   /**
    * 使用 @RequestPart 上传用户头像 - multipart/form-data 文件上传
+   * 集成 StorageService 实现文件持久化存储
    *
    * 等同于 Spring Boot: @PostMapping + @RequestPart("avatar") MultipartFile
    * 框架自动为含 @RequestPart 参数的路由注入 multer 中间件，无需手动配置。
@@ -212,18 +218,66 @@ export class UserController {
   async uploadAvatar(
     @PathVariable('id') id: string,
     @RequestPart('avatar') avatar: MultipartFile,
-  ): Promise<{ filename: string; size: number; contentType: string | null }> {
+  ): Promise<{ url: string; key: string; filename: string; size: number }> {
     if (avatar.isEmpty()) {
       throw new Error('上传的文件为空');
     }
+
+    const buffer = avatar.getBytes();
+    const options: UploadOptions = {
+      folder: 'avatars',
+      maxSize: 5 * 1024 * 1024,
+      allowedTypes: ['image/jpeg', 'image/png', 'image/gif', 'image/webp'],
+    };
+
+    const result = await this.storageService.upload(buffer, avatar.getOriginalFilename(), options);
 
     // 触发异步审计日志（@Async fire-and-forget，不阻塞响应）
     this.userService.recordAuditLog('UPLOAD_AVATAR', Number(id));
 
     return {
+      url: result.url,
+      key: result.key,
       filename: avatar.getOriginalFilename(),
       size: avatar.getSize(),
-      contentType: avatar.getContentType(),
     };
+  }
+
+  // ==================== @JsonFormat 示例端点 ====================
+
+  /**
+   * 使用 @JsonFormat 格式化日期 - 返回带格式化日期的 DTO
+   *
+   * 等同于 Spring Boot: Jackson @JsonFormat
+   * 框架自动在响应序列化时格式化标注了 @JsonFormat 的 Date 字段：
+   * - createdAt: "2024-01-15 08:30:00" (上海时区字符串)
+   * - updatedAt: 1709971200000 (Unix 毫秒时间戳数字)
+   *
+   * @example
+   * GET /api/users/1/response
+   * Response:
+   * {
+   *   "id": 1,
+   *   "username": "test",
+   *   "email": "test@example.com",
+   *   "createdAt": "2024-01-15 08:30:00",
+   *   "updatedAt": 1709971200000
+   * }
+   */
+  @GetMapping('/:id/response')
+  async getUserResponse(@PathVariable('id') id: string): Promise<UserResponseDto | null> {
+    const user = await this.userService.getUserById(Number(id));
+    if (!user) {
+      return null;
+    }
+    const response: UserResponseDto = {
+      id: user.id,
+      username: user.username,
+      email: user.email,
+      age: user.age,
+      createdAt: user.createdAt,
+      updatedAt: user.updatedAt,
+    };
+    return response;
   }
 }
