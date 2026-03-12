@@ -33,6 +33,8 @@ import type { AsyncOptions } from '../types.js';
 const EVENT_LISTENER_METADATA = 'aiko-boot:eventListener';
 const LIFECYCLE_METADATA = 'aiko-boot:lifecycle';
 const ASYNC_METADATA = 'aiko-boot:async';
+// Separate key for AsyncOptions so ASYNC_METADATA remains a plain boolean flag
+const ASYNC_OPTIONS_METADATA = 'aiko-boot:asyncOptions';
 
 // 生命周期类型
 export type LifecycleEvent = 
@@ -211,10 +213,11 @@ function defaultAsyncErrorHandler(error: unknown, methodName: string): void {
 /**
  * @Async - Execute a method as a background task (like Spring Boot @Async)
  *
- * The decorated method returns `void` immediately.  The original async logic is
- * scheduled with `setImmediate` so that it runs after the current event-loop tick,
- * detached from the caller's execution path.  This mirrors Spring's fire-and-forget
- * semantics when a `@Async` method returns `void`.
+ * The decorated method returns a resolved `Promise` immediately.  The original
+ * async logic is scheduled with `setImmediate` so that it runs after the current
+ * event-loop tick, detached from the caller's execution path.  This mirrors Spring's
+ * fire-and-forget semantics: `await`-ing the decorated method does **not** wait for
+ * the background task to complete.
  *
  * Error handling:
  * - By default, any uncaught error is written to `console.error`.
@@ -240,10 +243,17 @@ function defaultAsyncErrorHandler(error: unknown, methodName: string): void {
  * async heavyReport(): Promise<void> { ... }
  */
 export function Async(options: AsyncOptions = {}) {
-  return function (target: any, propertyKey: string, descriptor: PropertyDescriptor) {
-    Reflect.defineMetadata(ASYNC_METADATA, { ...options }, target, propertyKey);
+  return function <T extends (...args: any[]) => void | Promise<void>>(
+    target: any,
+    propertyKey: string,
+    descriptor: TypedPropertyDescriptor<T>,
+  ): TypedPropertyDescriptor<T> {
+    // Store a boolean flag so lifecycle/event readers can treat it as boolean.
+    Reflect.defineMetadata(ASYNC_METADATA, true, target, propertyKey);
+    // Store the options object under a separate key.
+    Reflect.defineMetadata(ASYNC_OPTIONS_METADATA, { ...options }, target, propertyKey);
 
-    const original = descriptor.value;
+    const original = descriptor.value!;
     descriptor.value = function (this: any, ...args: any[]) {
       const ctx = this;
       setImmediate(async () => {
@@ -251,11 +261,26 @@ export function Async(options: AsyncOptions = {}) {
           await original.apply(ctx, args);
         } catch (error) {
           const handler = options.onError ?? defaultAsyncErrorHandler;
-          handler(error, propertyKey);
+          try {
+            await handler(error, propertyKey);
+          } catch (handlerError) {
+            if (handler !== defaultAsyncErrorHandler) {
+              try {
+                await defaultAsyncErrorHandler(handlerError, propertyKey);
+              } catch {
+                // Swallow to ensure @Async never crashes the process
+              }
+            }
+          }
         }
       });
-      // Return void immediately — fire-and-forget
-    };
+      // The wrapper always returns Promise<void>; the cast is required because the
+      // wrapper's return type is not directly assignable to T (which may be void or
+      // Promise<void>), even though both satisfy the constraint.
+      // Return a resolved Promise so callers can safely call .catch() on the result
+      // without triggering a TypeError (fire-and-forget semantics are still preserved).
+      return Promise.resolve();
+    } as unknown as T;
     return descriptor;
   };
 }
@@ -271,7 +296,7 @@ export function isAsync(target: any, methodName: string): boolean {
  * Returns the AsyncOptions recorded by @Async on the given method, or undefined.
  */
 export function getAsyncOptions(target: any, methodName: string): AsyncOptions | undefined {
-  return Reflect.getMetadata(ASYNC_METADATA, target, methodName);
+  return Reflect.getMetadata(ASYNC_OPTIONS_METADATA, target, methodName);
 }
 
 /**

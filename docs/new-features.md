@@ -4,7 +4,7 @@
 >
 > 这些能力均已集成到新一代 **Aiko Boot** 框架（`@ai-partner-x/aiko-boot-starter-web` + `@ai-partner-x/aiko-boot`），支持 Spring Boot 风格的自动配置（AutoConfiguration）和配置化能力（`@ConfigurationProperties`）。
 >
-> 完整示例代码见 [`app/examples/api-new-feature/`](../app/examples/api-extend/)。
+> 完整示例代码见 [`app/examples/api-extend/`](../app/examples/api-extend/)。
 
 ---
 
@@ -74,37 +74,40 @@ export function RequestPart(name?: string) {
 export class MultipartProperties {
   enabled?: boolean = true;
   maxFileSize?: string = '1MB';     // spring.servlet.multipart.max-file-size
-  maxRequestSize?: string = '10MB'; // spring.servlet.multipart.max-request-size
 }
 ```
 
-`WebAutoConfiguration` 启动时读取该配置并将大小限制传递给 multer：
+`WebAutoConfiguration` 启动时读取该配置并将单文件大小限制传递给 multer。注意：`server.maxHttpPostSize` 仅控制 JSON body-parser（`express.json({ limit })`）的大小限制，**对 multipart/form-data 请求不起作用**。如需限制整体 multipart 请求大小，请使用 multer/busboy limits 或专用中间件：
 
 ```typescript
 // packages/aiko-boot-starter-web/src/auto-configuration.ts (WebAutoConfiguration)
-const multipartOptions = multipartEnabled
-  ? {
-      maxFileSize:    parseSizeToBytes(maxFileSizeStr),    // "1MB" → 1048576
-      maxRequestSize: parseSizeToBytes(maxRequestSizeStr),
-    }
-  : undefined;
 
+// JSON body-parser 大小限制：来自 server.maxHttpPostSize（默认 10mb）
+const maxHttpPostSizeStr = ConfigLoader.get<string>('server.maxHttpPostSize', '10mb');
+
+// multipart 单文件大小限制：来自 spring.servlet.multipart.maxFileSize
+const multipartMaxFileSizeStr =
+  ConfigLoader.get<string>('spring.servlet.multipart.maxFileSize', '1MB');
+const multipartOptions = multipartEnabled
+  ? { maxFileSize: parseSizeToBytes(multipartMaxFileSizeStr) }  // "1MB" → 1048576
+  : undefined;  // undefined 表示禁用；使用 @RequestPart 的路由会在注册时 throw
+
+app.use(express.json({ limit: resolvedBodyLimit }));
 app.use(createExpressRouter(validControllers, {
   prefix: contextPath,
   verbose,
-  multipart: multipartOptions,   // 传递给 multer limits
+  multipart: multipartOptions,   // undefined = 禁用上传（含 @RequestPart 的路由将在注册时抛出错误）
 }));
 ```
 
 #### 路由注册时的自动 multer 挂载（`packages/aiko-boot-starter-web/src/express-router.ts`）
 
 ```typescript
-const uploadMiddleware = Object.keys(partParams).length > 0
+const uploadMiddleware = (Object.keys(partParams).length > 0 && multipart !== undefined)
   ? multer({
       storage: multer.memoryStorage(),
       limits: {
-        fileSize:  multipart?.maxFileSize,    // from spring.servlet.multipart.max-file-size
-        fieldSize: multipart?.maxRequestSize, // from spring.servlet.multipart.max-request-size
+        fileSize: multipart?.maxFileSize,    // from spring.servlet.multipart.max-file-size
       },
     }).fields(
       Object.values(partParams).map(p => ({ name: p.name, maxCount: 1 }))
@@ -119,15 +122,14 @@ const uploadMiddleware = Object.keys(partParams).length > 0
 ```typescript
 export default {
   server: {
-    port: 3001,
+    port: 3003,
     servlet: { contextPath: '/api' },
   },
   spring: {
     servlet: {
       multipart: {
         enabled: true,
-        maxFileSize: '5MB',       // 单个文件上限
-        maxRequestSize: '20MB',   // 整个请求上限
+        maxFileSize: '5MB',       // 单个文件上限（spring.servlet.multipart.max-file-size）
       },
     },
   },
@@ -163,9 +165,13 @@ export class UploadController {
     @RequestPart('document')  document:  MultipartFile,
     @RequestPart('thumbnail') thumbnail: MultipartFile,
   ): Promise<object> {
-    await document.transferTo(`/tmp/${document.getOriginalFilename()}`);
-    await thumbnail.transferTo(`/tmp/${thumbnail.getOriginalFilename()}`);
-    return { saved: [document.getOriginalFilename(), thumbnail.getOriginalFilename()] };
+    // Use path.basename() to strip any path separators from the client-supplied
+    // filename and prevent path-traversal attacks.
+    const docName  = path.basename(document.getOriginalFilename()  ?? 'document');
+    const thumbName = path.basename(thumbnail.getOriginalFilename() ?? 'thumbnail');
+    await document.transferTo(`/tmp/uploads/${docName}`);
+    await thumbnail.transferTo(`/tmp/uploads/${thumbName}`);
+    return { saved: [docName, thumbName] };
   }
 }
 ```
@@ -174,10 +180,10 @@ export class UploadController {
 
 ```bash
 # 单文件
-curl -X POST http://localhost:3001/api/upload/single -F "file=@photo.png"
+curl -X POST http://localhost:3003/api/upload/single -F "file=@photo.png"
 
 # 多文件
-curl -X POST http://localhost:3001/api/upload/multi \
+curl -X POST http://localhost:3003/api/upload/multi \
   -F "document=@doc.pdf" -F "thumbnail=@thumb.png"
 ```
 
@@ -285,10 +291,10 @@ export class FormController {
 
 ```bash
 # URL 查询参数 → @ModelAttribute
-curl "http://localhost:3001/api/form/search?keyword=alice&page=2"
+curl "http://localhost:3003/api/form/search?keyword=alice&page=2"
 
 # form-urlencoded body → @ModelAttribute
-curl -X POST http://localhost:3001/api/form/register \
+curl -X POST http://localhost:3003/api/form/register \
   -d "username=alice&email=alice@example.com"
 ```
 
@@ -329,13 +335,13 @@ export class FormController {
 ```
 
 ```bash
-curl http://localhost:3001/api/form/profile
-curl http://localhost:3001/api/form/tenant-info
+curl http://localhost:3003/api/form/profile
+curl http://localhost:3003/api/form/tenant-info
 ```
 
 ---
 
-## 四、JSON 序列化格式化 — `@JsonFormat`
+## 三、JSON 序列化格式化 — `@JsonFormat`
 
 ### 功能概述
 
@@ -515,7 +521,7 @@ export class UserController {
 #### 3. `curl` 测试
 
 ```bash
-curl http://localhost:3001/api/users/1
+curl http://localhost:3003/api/users/1
 ```
 
 #### 支持的 `pattern` token 速查
@@ -539,25 +545,25 @@ curl http://localhost:3001/api/users/1
 
 ---
 
-## 五、异步与响应式支持 — `@Async`
+## 四、异步与响应式支持 — `@Async`
 
 ### 功能概述
 
 `@Async` 来自 `@ai-partner-x/aiko-boot`，对应 Spring Boot 的 `@Async`（fire-and-forget 语义）：
 
-- 调用方**立即**收到 `void` 返回值，HTTP 响应几乎在 0ms 内返回。
+- 被装饰方法立即返回一个已 resolve 的 `Promise<void>`（fire-and-forget），HTTP 响应几乎在 0ms 内返回。
 - 被装饰方法的真实逻辑通过 `setImmediate` 在下一个事件循环 tick 中执行，与调用方的执行路径完全解耦。
 - 支持通过 `onError` 选项自定义后台异常处理器，后台异常不会影响调用方，也不会造成未处理的 Promise 拒绝。
 - `@ai-partner-x/aiko-boot-starter-web` 重新导出 `@Async`，使开发者可以从一个包完成所有导入。
 
 | TypeScript | Java Spring 对应 |
 |---|---|
-| `@Async()` | `@Async`（返回 `void`，fire-and-forget） |
+| `@Async()` | `@Async`（返回 `Promise<void>`，fire-and-forget） |
 | `@Async({ onError })` | `@Async` + `AsyncUncaughtExceptionHandler` |
 
 ### 开发思路
 
-1. **装饰器包装原方法**：`@Async` 将原始方法替换为一个立即返回 `void` 的同步函数，原始逻辑被推入 `setImmediate` 队列。
+1. **装饰器包装原方法**：`@Async` 将原始方法替换为一个立即返回已 resolve 的 `Promise<void>` 的函数，原始逻辑被推入 `setImmediate` 队列。`await` 被装饰方法**不会**等待后台任务完成。
 2. **错误隔离**：通过 `try/catch` 包裹后台逻辑；若用户未提供 `onError`，则使用默认的 `console.error` 处理器。这确保后台任务的任何异常都不会变成未处理的 Promise 拒绝，也不会向调用方传播。
 3. **DI 兼容**：`@Async` 仅修改方法描述符，与 `@Service` / `@Component` 正交，可同时使用，无需特殊配置。
 4. **统一导出**：`@ai-partner-x/aiko-boot-starter-web` 将 `@Async` 重新导出，Web 层开发者无需额外依赖 `@ai-partner-x/aiko-boot`。
@@ -572,16 +578,19 @@ export interface AsyncOptions {
    * 后台任务抛出未处理异常时的回调。
    * 默认行为：console.error
    */
-  onError?: (error: unknown, methodName: string) => void;
+  onError?: (error: unknown, methodName: string) => void | Promise<void>;
 }
 ```
 
-#### `@Async` 装饰器实现（`packages/aiko-boot/src/decorators.ts`）
+#### `@Async` 装饰器实现（`packages/aiko-boot/src/boot/lifecycle.ts`）
 
 ```typescript
 export function Async(options: AsyncOptions = {}) {
   return function (target: any, propertyKey: string, descriptor: PropertyDescriptor) {
-    Reflect.defineMetadata(ASYNC_METADATA, { ...options }, target, propertyKey);
+    // Store a boolean flag so lifecycle/event readers can treat it as boolean.
+    Reflect.defineMetadata(ASYNC_METADATA, true, target, propertyKey);
+    // Store the options object under a separate key.
+    Reflect.defineMetadata(ASYNC_OPTIONS_METADATA, { ...options }, target, propertyKey);
 
     const original = descriptor.value;
     descriptor.value = function (this: any, ...args: any[]) {
@@ -591,10 +600,22 @@ export function Async(options: AsyncOptions = {}) {
           await original.apply(ctx, args);
         } catch (error) {
           const handler = options.onError ?? defaultAsyncErrorHandler;
-          handler(error, propertyKey);
+          try {
+            await handler(error, propertyKey);
+          } catch (handlerError) {
+            if (handler !== defaultAsyncErrorHandler) {
+              try {
+                await defaultAsyncErrorHandler(handlerError, propertyKey);
+              } catch {
+                // Swallow to ensure @Async never crashes the process
+              }
+            }
+          }
         }
       });
-      // 立即返回 void — fire-and-forget
+      // Return a resolved Promise so callers can safely call .catch() on the result
+      // without triggering a TypeError (fire-and-forget semantics are still preserved).
+      return Promise.resolve();
     };
     return descriptor;
   };
@@ -672,7 +693,7 @@ export class ReportService {
 
 ---
 
-## 六、功能对照表
+## 五、功能对照表
 
 | 功能 | 装饰器 / 类型 | 所在包 | Spring Boot 对应 |
 |---|---|---|---|
@@ -690,7 +711,7 @@ export class ReportService {
 
 ---
 
-## 七、安装与运行示例
+## 六、安装与运行示例
 
 ```bash
 # 1. 安装依赖（仓库根目录）
@@ -700,9 +721,9 @@ pnpm install
 pnpm --filter "@ai-partner-x/*" build
 
 # 3. 进入示例目录并启动
-cd app/examples/user-crud/packages/api
+cd app/examples/api-extend
 pnpm dev
-# → http://localhost:3001
+# → http://localhost:3003
 ```
 
 ### 示例配置文件（`app.config.ts`）
@@ -712,7 +733,7 @@ pnpm dev
 export default {
   logging: { level: { root: 'debug' } },
   server: {
-    port: 3001,
+    port: 3003,
     servlet: { contextPath: '/api' },
     shutdown: 'graceful',
   },
@@ -721,7 +742,6 @@ export default {
       multipart: {
         enabled: true,
         maxFileSize: '5MB',
-        maxRequestSize: '20MB',
       },
     },
   },

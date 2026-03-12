@@ -209,7 +209,12 @@ export interface MultipartFile {
 
 /**
  * @RequestPart - Extract a part from a multipart/form-data request (like Spring Boot @RequestPart)
- * Used with file uploads. The route automatically gets multer middleware applied.
+ *
+ * Used with file uploads. Multer middleware is applied to the route only when multipart uploads
+ * are enabled/configured (e.g. via `ExpressRouterOptions.multipart` or framework auto-configuration
+ * such as `WebAutoConfiguration` / `spring.servlet.multipart.enabled`). If multipart support is not
+ * configured/enabled for a route that uses `@RequestPart`, the router will fail fast and throw during
+ * route registration instead of injecting an undefined parameter.
  *
  * @param name - The name of the form field (defaults to 'file')
  *
@@ -259,6 +264,58 @@ export function ModelAttribute(name?: string) {
     modelAttrs[parameterIndex] = { name: name || '' };
     Reflect.defineMetadata(MODEL_ATTRIBUTE_METADATA, modelAttrs, target, propertyKey);
   };
+}
+
+/**
+ * Type conversion helper for @ModelAttribute parameters
+ * 
+ * Automatically converts string values to appropriate types (number, boolean) when possible.
+ * This helper reduces manual type conversion in controller methods.
+ * 
+ * @example
+ * // Without helper (manual conversion required)
+ * @GetMapping('/search')
+ * async search(@ModelAttribute() query: SearchDto) {
+ *   return {
+ *     page: Number(query.page ?? 1),
+ *     size: Number(query.size ?? 10),
+ *     active: query.active === 'true',
+ *   };
+ * }
+ * 
+ * // With helper (automatic conversion)
+ * @GetMapping('/search')
+ * async search(@ModelAttribute() query: SearchDto) {
+ *   const parsed = convertModelAttributes(query);
+ *   return {
+ *     page: parsed.page ?? 1,
+ *     size: parsed.size ?? 10,
+ *     active: parsed.active ?? false,
+ *   };
+ * }
+ */
+export function convertModelAttributes<T extends Record<string, unknown>>(input: T): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  
+  for (const [key, value] of Object.entries(input)) {
+    if (typeof value === 'string') {
+      // Try to convert to number
+      const numValue = Number(value);
+      if (!isNaN(numValue) && value.trim() !== '') {
+        result[key] = numValue;
+      } else if (value.toLowerCase() === 'true') {
+        result[key] = true;
+      } else if (value.toLowerCase() === 'false') {
+        result[key] = false;
+      } else {
+        result[key] = value;
+      }
+    } else {
+      result[key] = value;
+    }
+  }
+  
+  return result;
 }
 
 /**
@@ -332,6 +389,8 @@ const SORTED_DATE_TOKEN_KEYS: ReadonlyArray<string> = [
  * Serialization shape for @JsonFormat.
  * - `STRING` (default): serialize Date as a formatted string (uses `pattern`)
  * - `NUMBER`: serialize Date as epoch milliseconds (Unix timestamp × 1000)
+ * 
+ * @default 'STRING'
  */
 export type JsonFormatShape = 'STRING' | 'NUMBER';
 
@@ -426,12 +485,12 @@ export function formatDate(date: Date, pattern: string, timezone?: string): stri
         hour: '2-digit',
         minute: '2-digit',
         second: '2-digit',
-        hour12: false,
+        hourCycle: 'h23', // Ensure hours are in 0–23 range to avoid 24:00 edge cases
       }).formatToParts(date).forEach(p => { parts[p.type] = p.value; });
       y  = parseInt(parts.year, 10);
       mo = parseInt(parts.month, 10);
       d  = parseInt(parts.day, 10);
-      h  = parseInt(parts.hour, 10) % 24; // Normalizes hour 24→0: some ICU/V8 builds represent midnight as '24:00:00' rather than '00:00:00'
+      h  = parseInt(parts.hour, 10);
       mi = parseInt(parts.minute, 10);
       s  = parseInt(parts.second, 10);
       ms = date.getMilliseconds(); // Milliseconds are sub-second precision; timezones offset by whole minutes only, so this value is timezone-independent
@@ -493,24 +552,69 @@ export function formatDate(date: Date, pattern: string, timezone?: string): stri
  *   annotated with @JsonFormat is converted to a string (or number) according
  *   to the decorator options.
  * - Arrays: each element is recursively transformed.
- * - Plain objects / primitives: returned as-is (nested objects are still walked).
+ * - Plain objects: shallow-copied into a new plain object whose own enumerable
+ *   properties are recursively transformed (nested objects are still walked).
+ * - Primitives (`string`, `number`, `boolean`): returned unchanged.
  * - `Date` values without an annotation: returned unchanged (serialized to ISO
  *   string by JSON.stringify as usual).
- * - Non-plain built-in objects (Map, Set, Buffer, etc.) are not transformed and
- *   will appear as empty `{}` if returned directly; avoid returning them from
- *   controllers — use arrays or plain DTOs instead.
+ * - Non-plain built-in objects (Buffer, Map, Set, Error, etc.) are returned
+ *   unchanged to preserve their native JSON serialisation behaviour.
+ * - Circular / shared references are detected via a WeakMap; the
+ *   already-transformed copy is returned so every reference to the same
+ *   source object yields a consistently-formatted result.
  *
  * @param value The value to transform (typically the controller return value)
+ * @param visited Internal WeakMap used to memoize transformed copies and detect circular references (do not pass)
  */
-export function applyJsonFormat(value: unknown): unknown {
+export function applyJsonFormat(value: unknown, visited: WeakMap<object, unknown> = new WeakMap()): unknown {
   if (value === null || value === undefined) return value;
   if (Array.isArray(value)) {
-    return value.map(item => applyJsonFormat(item));
+    // Handle arrays with memoization to support circular/shared references
+    if (visited.has(value as object)) {
+      return visited.get(value as object);
+    }
+    const out: unknown[] = [];
+    // Register the array copy before recursing to break cycles
+    visited.set(value as object, out);
+    for (const item of value) {
+      out.push(applyJsonFormat(item, visited));
+    }
+    return out;
   }
   if (value instanceof Date) {
     return value;
   }
   if (typeof value === 'object') {
+    // Return non-plain built-in types unchanged to preserve their default serialisation
+    if (
+      Buffer.isBuffer(value) ||
+      value instanceof Map ||
+      value instanceof Set ||
+      value instanceof Error ||
+      value instanceof Uint8Array ||
+      value instanceof RegExp ||
+      value instanceof URL ||
+      value instanceof Date
+    ) {
+      return value;
+    }
+
+    // Return the already-transformed copy for circular/shared references
+    if (visited.has(value)) {
+      return visited.get(value);
+    }
+
+    // If the object defines a toJSON method, honor it and then apply formatting.
+    // Guard against self-referential toJSON (e.g. toJSON returns `this`): if the
+    // returned value is the same reference, fall through to standard object handling.
+    const anyValue = value as any;
+    if (typeof anyValue.toJSON === 'function') {
+      const jsonValue = anyValue.toJSON.call(anyValue) as unknown;
+      if (jsonValue !== value) {
+        return applyJsonFormat(jsonValue, visited);
+      }
+    }
+
     const proto = Object.getPrototypeOf(value);
     const formats: Record<string, JsonFormatOptions> =
       proto && proto !== Object.prototype
@@ -518,6 +622,8 @@ export function applyJsonFormat(value: unknown): unknown {
         : {};
 
     const result: Record<string, unknown> = {};
+    // Register result in the map before recursing so circular refs resolve to the partial copy
+    visited.set(value, result);
     for (const key of Object.keys(value as Record<string, unknown>)) {
       const val = (value as Record<string, unknown>)[key];
       const fmt = formats[key];
@@ -530,7 +636,7 @@ export function applyJsonFormat(value: unknown): unknown {
             : val.toISOString();
         }
       } else {
-        result[key] = applyJsonFormat(val);
+        result[key] = applyJsonFormat(val, visited);
       }
     }
     return result;

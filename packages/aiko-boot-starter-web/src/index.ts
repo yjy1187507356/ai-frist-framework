@@ -27,6 +27,7 @@ export {
   ModelAttribute,
   RequestAttribute,
   JsonFormat,
+  convertModelAttributes,
   applyJsonFormat,
   formatDate,
   getControllerMetadata,
@@ -80,6 +81,7 @@ export {
   getServerConfig,
   setServerConfig,
   getExpressApp,
+  useExpressApp,
   ExpressHttpServer,
 } from './auto-configuration.js';
 

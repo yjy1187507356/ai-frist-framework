@@ -33,6 +33,9 @@ import { Container, injectAutowiredProperties } from '@ai-partner-x/aiko-boot/di
 import multer from 'multer';
 import { writeFile } from 'fs/promises';
 
+/** Default maximum file size (1 MB) applied when multipart is enabled but maxFileSize is not configured. */
+const DEFAULT_MAX_FILE_SIZE = 1024 * 1024;
+
 export interface ExpressRouterOptions {
   /**
    * Controller 实例列表（仅在不使用 DI 时需要）
@@ -45,14 +48,13 @@ export interface ExpressRouterOptions {
   verbose?: boolean;
   /**
    * 文件上传限制（由 spring.servlet.multipart.* 配置驱动）
-   * 未设置时 multer 不限制单个文件大小。
-   * 整个请求的大小限制由 Express body-parser（server.maxHttpPostSize）统一控制。
+   * 未设置（undefined）时视为 multipart 功能已禁用，含 @RequestPart 的路由不会挂载 multer 中间件。
+   * 单个文件大小限制（maxFileSize）由 multer limits.fileSize 控制。
+   * 注意：框架不支持整个 multipart 请求的大小限制，如需限制请在应用层通过 Express 中间件自行实现。
    */
   multipart?: {
     /** 单个文件最大字节数 (spring.servlet.multipart.max-file-size) */
     maxFileSize?: number;
-    /** 整个请求最大字节数 — 传给 Express body-parser limit (spring.servlet.multipart.max-request-size) */
-    maxRequestSize?: number;
   };
 }
 
@@ -64,7 +66,7 @@ type MulterFile = {
   buffer: Buffer;
 };
 
-type AnyRequest  = {
+type AnyRequest = {
   params: Record<string, string>;
   query: Record<string, string>;
   body: any;
@@ -72,9 +74,17 @@ type AnyRequest  = {
   files?: Record<string, MulterFile[]>;
   [key: string]: any;
 };
-type AnyResponse = { json: (data: any) => void; status: (code: number) => AnyResponse };
-type NextFn      = (err?: any) => void;
-type Handler     = (req: AnyRequest, res: AnyResponse, next: NextFn) => void;
+
+type AnyResponse = {
+  json: (data: any) => AnyResponse;
+  status: (code: number) => AnyResponse;
+  set?: (key: string, value: string) => AnyResponse;
+  send?: (body?: any) => AnyResponse;
+};
+
+type NextFn = (err?: any) => void;
+
+type Handler = (req: AnyRequest, res: AnyResponse, next: NextFn) => void | Promise<void>;
 
 interface MiniRouter {
   get(path: string, ...handlers: any[]): void;
@@ -164,18 +174,45 @@ function registerController(
     const modelAttrs      = getModelAttributes(ControllerClass.prototype, methodName);
     const requestAttrs    = getRequestAttributes(ControllerClass.prototype, methodName);
 
-    // Build multer middleware when the handler has @RequestPart parameters
-    // Note: multer `fileSize` limits each individual file.
-    // Total request size is controlled by Express body-parser (server.maxHttpPostSize).
-    const uploadMiddleware = Object.keys(partParams).length > 0
-      ? multer({
-          storage: multer.memoryStorage(),
-          limits: {
-            fileSize: multipart?.maxFileSize,
-          },
-        }).fields(
-          Object.values(partParams).map(p => ({ name: p.name, maxCount: 1 }))
-        )
+    // Build multer middleware when the handler has @RequestPart parameters AND
+    // multipart uploads are enabled (multipart !== undefined).
+    // Fail fast during route registration if @RequestPart is used but multipart
+    // is not configured, so the error is clear rather than silently producing
+    // undefined parameters at runtime.
+    const hasRequestParts = Object.keys(partParams).length > 0;
+
+    if (hasRequestParts && multipart === undefined) {
+      throw new Error(
+        `[aiko-boot] Multipart processing is disabled but route ` +
+        `${ControllerClass.name}.${String(methodName)} uses @RequestPart. ` +
+        'Please enable multipart support (e.g. spring.servlet.multipart.enabled=true) ' +
+        'and configure ExpressRouterOptions.multipart.',
+      );
+    }
+
+    const uploadMiddleware = (hasRequestParts && multipart !== undefined)
+      ? (() => {
+          const partParamList = Object.values(partParams);
+          const seenNames = new Map<string, number>();
+          for (const p of partParamList) {
+            const count = (seenNames.get(p.name) ?? 0) + 1;
+            if (count > 1) {
+              throw new Error(
+                `Duplicate @RequestPart name '${p.name}' in ` +
+                `${ControllerClass.name}.${String(methodName)}. ` +
+                'Each @RequestPart on a method must have a unique name.',
+              );
+            }
+            seenNames.set(p.name, count);
+          }
+          return multer({
+            storage: multer.memoryStorage(),
+            limits: {
+              // Default to DEFAULT_MAX_FILE_SIZE if maxFileSize is not specified, to avoid unbounded memory usage.
+              fileSize: multipart?.maxFileSize ?? DEFAULT_MAX_FILE_SIZE,
+            },
+          }).fields(partParamList.map(p => ({ name: p.name, maxCount: 1 })));
+        })()
       : null;
 
     const handler: Handler = async (req, res, _next) => {
@@ -215,9 +252,12 @@ function registerController(
         // 注入 @ModelAttribute (合并 query + body 表单字段)
         for (const idx of Object.keys(modelAttrs)) {
           const queryObj = req.query || {};
-          const bodyObj  = (req.body && typeof req.body === 'object' && !Buffer.isBuffer(req.body))
+          const bodyObj = (req.body && typeof req.body === 'object' && !Buffer.isBuffer(req.body) && !Array.isArray(req.body))
             ? req.body
             : {};
+          if (Array.isArray(req.body)) {
+            console.warn('[aiko-boot] @ModelAttribute received array body. Only object types are supported. Using empty object.');
+          }
           args[Number(idx)] = { ...queryObj, ...bodyObj };
         }
 
