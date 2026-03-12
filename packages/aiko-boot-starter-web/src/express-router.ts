@@ -245,7 +245,19 @@ function registerController(
           const multerFiles = req.files as Record<string, MulterFile[]> | undefined;
           const multerFile = multerFiles?.[name]?.[0];
           if (multerFile) {
+            // 文件部分：转换为 Spring 兼容的 MultipartFile
             args[Number(idx)] = createMultipartFile(multerFile);
+          } else {
+            // 非文件部分：从 multipart 表单的字段中读取 (req.body)
+            const bodyObj =
+              req.body &&
+              typeof req.body === 'object' &&
+              !Buffer.isBuffer(req.body)
+                ? (req.body as Record<string, unknown>)
+                : undefined;
+            if (bodyObj && Object.prototype.hasOwnProperty.call(bodyObj, name)) {
+              args[Number(idx)] = bodyObj[name];
+            }
           }
         }
 

@@ -642,10 +642,28 @@ export function applyJsonFormat(value: unknown, visited: WeakMap<object, unknown
     // returned value is the same reference, fall through to standard object handling.
     const anyValue = value as any;
     if (typeof anyValue.toJSON === 'function') {
+      // Register a placeholder object BEFORE calling toJSON so that any re-entrant
+      // call to applyJsonFormat(value) caused by toJSON() returning an object that
+      // still references the original instance (e.g. { self: this }) will find the
+      // placeholder in `visited` and stop recursing instead of looping/overflowing.
+      const placeholder: Record<string, unknown> = {};
+      visited.set(value, placeholder);
       const jsonValue = anyValue.toJSON.call(anyValue) as unknown;
       if (jsonValue !== value) {
-        return applyJsonFormat(jsonValue, visited);
+        const result = applyJsonFormat(jsonValue, visited);
+        // Back-fill the placeholder with the final result so that any part of the
+        // object graph that already received the placeholder reference (due to a
+        // cycle through the original object) now sees the fully-resolved content.
+        if (result !== null && result !== undefined && typeof result === 'object' && !Array.isArray(result)) {
+          Object.assign(placeholder, result as object);
+        }
+        // Point visited to the final result for any future lookups.
+        visited.set(value, result);
+        return result;
       }
+      // If toJSON returned the same reference, fall through to standard object handling.
+      // Remove the placeholder so the standard path can register the real result object.
+      visited.delete(value);
     }
 
     const proto = Object.getPrototypeOf(value);

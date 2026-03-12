@@ -27,7 +27,7 @@ export class UploadController {
     @RequestPart('file') file: MultipartFile,
     @RequestPart('folder') folder?: string,
   ): Promise<UploadResult> {
-    return this.storageService.upload(file.buffer, file.originalname, {
+    return this.storageService.upload(file.getBytes(), file.getOriginalFilename(), {
       folder: folder || 'uploads',
       maxSize: 10 * 1024 * 1024, // 10MB
       allowedTypes: ['image/jpeg', 'image/png', 'image/gif', 'image/webp'],

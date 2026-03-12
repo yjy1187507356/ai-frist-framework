@@ -254,6 +254,67 @@ describe('applyJsonFormat', () => {
     expect(result.ref).toBeUndefined();
   });
 
+  test('toJSON 返回包含原始对象引用的新对象时不应死循环', () => {
+    // toJSON returns { self: this } — a NEW object that still references the original instance.
+    // This must not cause infinite recursion / stack overflow.
+    const obj: any = { name: 'test', value: 42 };
+    obj.toJSON = function (this: any) {
+      return { self: this, label: 'wrapped' };
+    };
+
+    expect(() => applyJsonFormat(obj)).not.toThrow();
+    const result: any = applyJsonFormat(obj);
+    expect(result).toBeDefined();
+    expect(result.label).toBe('wrapped');
+    // The self reference should resolve to some object (the placeholder / final result),
+    // not trigger infinite recursion.
+    expect(result.self).toBeDefined();
+  });
+
+  test('toJSON 返回 this 本身时应正常回退到标准对象处理', () => {
+    // toJSON returns `this` — the cycle guard must fall through to standard handling.
+    const obj: any = { name: 'fallback', value: 99 };
+    obj.toJSON = function (this: any) {
+      return this;
+    };
+
+    expect(() => applyJsonFormat(obj)).not.toThrow();
+    const result: any = applyJsonFormat(obj);
+    expect(result.name).toBe('fallback');
+    expect(result.value).toBe(99);
+  });
+
+  test('toJSON 返回的新对象内部有深层对原始对象的引用时不应死循环', () => {
+    // Deeper variant: toJSON returns a NEW object whose nested property references the original.
+    // e.g. toJSON() => { wrapper: { inner: this } }
+    const obj: any = { id: 7, label: 'deep' };
+    obj.toJSON = function (this: any) {
+      return { wrapper: { inner: this }, extra: 'ok' };
+    };
+
+    expect(() => applyJsonFormat(obj)).not.toThrow();
+    const result: any = applyJsonFormat(obj);
+    expect(result.extra).toBe('ok');
+    expect(result.wrapper).toBeDefined();
+    // inner resolves to the placeholder/result — must be defined, not loop.
+    expect(result.wrapper.inner).toBeDefined();
+  });
+
+  test('多个对象的 toJSON 互相引用时不应死循环', () => {
+    // A.toJSON references B, B.toJSON references A — mutual toJSON cycle.
+    const a: any = { name: 'A' };
+    const b: any = { name: 'B' };
+    a.toJSON = function () { return { fromA: true, ref: b }; };
+    b.toJSON = function () { return { fromB: true, ref: a }; };
+
+    expect(() => applyJsonFormat(a)).not.toThrow();
+    const result: any = applyJsonFormat(a);
+    expect(result.fromA).toBe(true);
+    expect(result.ref.fromB).toBe(true);
+    // result.ref.ref should resolve back to the already-memoized result of a — not loop.
+    expect(result.ref.ref).toBeDefined();
+  });
+
   test('应该正确处理嵌套对象中的循环引用', () => {
     const obj: any = {
       level1: {
