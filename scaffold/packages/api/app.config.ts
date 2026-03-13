@@ -75,11 +75,17 @@ export default {
   security: {
     enabled: true,
     jwt: {
-      secret: process.env.JWT_SECRET || 'your-secret-key',
+      secret: process.env.JWT_SECRET || (() => {
+        console.warn('⚠️ Using default JWT secret in development!');
+        return 'dev-only-secret';
+      })(),
       expiresIn: '1h',
     },
     session: {
-      secret: process.env.SESSION_SECRET || 'your-session-secret',
+      secret: process.env.SESSION_SECRET || (() => {
+        console.warn('⚠️ Using default session secret in development!');
+        return 'dev-only-session-secret';
+      })(),
       maxAge: 86400000,
       resave: false,
       saveUninitialized: false,
@@ -92,13 +98,25 @@ export default {
     },
     oauth2: {
       github: {
-        clientID: process.env.GITHUB_CLIENT_ID || 'your-github-client-id',
-        clientSecret: process.env.GITHUB_CLIENT_SECRET || 'your-github-client-secret',
+        clientID: process.env.GITHUB_CLIENT_ID || (() => {
+          console.warn('⚠️ Using default GitHub client ID in development!');
+          return 'your-github-client-id';
+        })(),
+        clientSecret: process.env.GITHUB_CLIENT_SECRET || (() => {
+          console.warn('⚠️ Using default GitHub client secret in development!');
+          return 'your-github-client-secret';
+        })(),
         callbackURL: process.env.GITHUB_CALLBACK_URL || 'http://localhost:3001/api/auth/github/callback',
       },
       google: {
-        clientID: process.env.GOOGLE_CLIENT_ID || 'your-google-client-id',
-        clientSecret: process.env.GOOGLE_CLIENT_SECRET || 'your-google-client-secret',
+        clientID: process.env.GOOGLE_CLIENT_ID || (() => {
+          console.warn('⚠️ Using default Google client ID in development!');
+          return 'your-google-client-id';
+        })(),
+        clientSecret: process.env.GOOGLE_CLIENT_SECRET || (() => {
+          console.warn('⚠️ Using default Google client secret in development!');
+          return 'your-google-client-secret';
+        })(),
         callbackURL: process.env.GOOGLE_CALLBACK_URL || 'http://localhost:3001/api/auth/google/callback',
       },
     },
