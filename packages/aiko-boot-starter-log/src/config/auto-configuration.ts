@@ -9,7 +9,7 @@
  * 4. 支持向后兼容的 'log' 和 'logger' 前缀
  */
 
-import type { LogConfig, LogLevel, TransportConfig } from './types';
+import type { LogConfig, LogLevel, TransportConfig } from '../types';
 import { ConfigLoader } from '@ai-partner-x/aiko-boot/boot';
 
 /**

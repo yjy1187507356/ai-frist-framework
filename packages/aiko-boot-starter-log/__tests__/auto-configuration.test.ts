@@ -10,7 +10,7 @@ import {
   createLogAutoConfiguration,
   logAutoConfigure,
   LoggingProperties
-} from '../src/auto-configuration';
+} from '../src/config/auto-configuration';
 import type { LogConfig, LogLevel } from '../src/types';
 
 describe('自动配置', () => {
