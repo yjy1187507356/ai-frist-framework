@@ -149,7 +149,6 @@ function parseController(filePath: string): ControllerInfo | null {
 function generateControllerCode(info: ControllerInfo, entityFile: string): string {
   const methodsCode = info.methods.map((m) => {
     const paramsStr = m.params.map((p) => `${p.name}: ${p.type}`).join(', ');
-
     let urlCode = `\`\${this.baseUrl}/api${info.basePath}${m.path}\``;
 
     for (const p of m.params) {
@@ -186,12 +185,12 @@ function generateControllerCode(info: ControllerInfo, entityFile: string): strin
   // 生成 import 语句
   const entityImports: string[] = [];
   const dtoImports: string[] = [];
-  const inlineTypes: string[] = []; // 需要内联使用的类型（如 LoginResultDto['userInfo']）
 
   info.imports.forEach((type) => {
-    // 如果类型包含方括号（如 LoginResultDto['userInfo']），则作为内联类型，不需要单独导入
+    // 内联类型（如 LoginResultDto['userInfo']）不需要单独导入，因为它们引用已导入的 DTO 类型
     if (type.includes('[') && type.includes(']')) {
-      inlineTypes.push(type);
+      // 跳过内联类型，避免尝试从不存在的 entity 文件导入
+      return;
     } else if (type.endsWith('Dto')) {
       dtoImports.push(type);
     } else {
